@@ -9,7 +9,7 @@ def main():
     save_path = Path("data/rpc-single")
 
     if not data_path.exists():
-        raise "Cannot found data path!"
+        raise FileNotFoundError("Cannot found data path!")
 
     print("Cloning original data...")
     shutil.copytree(src=data_path, dst=save_path)

@@ -23,7 +23,7 @@ def xywh_to_yolov8(x, y, w, h, image_width, image_height):
     return center_x_normalized, center_y_normalized, width_normalized, height_normalized
 
 
-def process(images_path: str, label_path: str, save_path: str):
+def process(images_path: Path, label_path: Path, save_path: Path):
     # create save folder
     (save_path / "images").mkdir(parents=True, exist_ok=True)
     (save_path / "labels").mkdir(parents=True, exist_ok=True)
