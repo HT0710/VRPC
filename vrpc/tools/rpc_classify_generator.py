@@ -7,7 +7,7 @@ from tqdm import tqdm
 import cv2
 
 
-def process(images_path: str, label_path: str, save_path: str):
+def _process(images_path: str, label_path: str, save_path: str):
     # read json data
     with open(label_path) as file:
         data = json.load(file)
@@ -60,14 +60,14 @@ def process(images_path: str, label_path: str, save_path: str):
 
 
 def main():
-    data_type = ["test", "val"]
+    data_type = ["train", "val", "test"]
 
     for type in data_type:
-        label_path = Path(f"data/archive/instances_{type}2019.json")
-        images_path = Path(f"data/archive/{type}2019")
-        save_path = Path(f"data/rpc-classify/{'train' if type == 'test' else type}")
+        label_path = Path(f"vrpc/data/archive/instances_{type}2019.json")
+        images_path = Path(f"vrpc/data/archive/{type}2019")
+        save_path = Path("vrpc/data/rpc-classify")
 
-        process(images_path, label_path, save_path)
+        _process(images_path, label_path, save_path)
 
 
 if __name__ == "__main__":
