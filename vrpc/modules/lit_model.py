@@ -29,6 +29,7 @@ class LitModel(LightningModule):
         optimizer: List[optim.Optimizer] = None,
         scheduler: List[lr_scheduler.LRScheduler] = None,
         checkpoint: str = None,
+        num_classes: int = None,
         device: str = "auto",
     ):
         """
@@ -46,6 +47,8 @@ class LitModel(LightningModule):
             The learning rate scheduler, by default None
         checkpoint : str, optional
             Path to a checkpoint file for model loading, by default None
+        num_classes : int, optional
+            The number of output layers, required only when the model does not provide one, by default None
         device : str, optional
             The device to load the model on, by default "auto"
         """
@@ -54,8 +57,17 @@ class LitModel(LightningModule):
         self.criterion = criterion
         self.optimizer = optimizer
         self.scheduler = scheduler
+        self.num_classes = num_classes or self._get_num_classes()
         if checkpoint:
             self.load(checkpoint, device=device)
+
+    def _get_num_classes(self):
+        if not hasattr(self.model, "num_classes"):
+            raise AttributeError(
+                'The input model does not provide num_classes. "num_classes" parameter cannot be None.'
+            )
+
+        return self.model.num_classes
 
     def _log(
         self, stage: str, loss: torch.Tensor, y_hat: torch.Tensor, y: torch.Tensor
@@ -75,7 +87,7 @@ class LitModel(LightningModule):
             The true labels.
         """
         acc = accuracy(
-            preds=y_hat, target=y, task="multiclass", num_classes=self.model.num_classes
+            preds=y_hat, target=y, task="multiclass", num_classes=self.num_classes
         )
         self.log_dict(
             {f"{stage}/loss": loss, f"{stage}/accuracy": acc},
