@@ -290,6 +290,10 @@ class ImagePreparation:
                 default_flow_style=False,
             )
 
+    def _benchmark(self, x):
+        "Calcute chunksize base on cpu parallel power"
+        return max(1, round(len(x) / (self.workers * psutil.cpu_freq().max / 1000) / 4))
+
     def auto(
         self, data_path: str, save_name: str = False, remake: bool = False
     ) -> None:
@@ -330,16 +334,11 @@ class ImagePreparation:
                 return
 
         # Process summary
-        print(f"\n[bold]Summary:[/]")
+        print("\n[bold]Summary:[/]")
         print(f"  Remake: {remake}")
         print(f"  Number of workers: {self.workers}")
         print(f"  Data path: [green]{self.data_path}[/]")
         print(f"  Save path: [green]{self.save_path}[/]")
-
-        # Calcute chunksize base on cpu parallel power
-        benchmark = lambda x: max(
-            1, round(len(x) / (self.workers * psutil.cpu_freq().max / 1000) / 4)
-        )
 
         # Split data
         print("\n[bold][yellow]Splitting data...[/][/]")
@@ -348,7 +347,7 @@ class ImagePreparation:
             self._split_data,
             class_folders,
             max_workers=self.workers,
-            chunksize=benchmark(class_folders),
+            chunksize=self._benchmark(class_folders),
         )
 
         # Save configuration
@@ -534,6 +533,10 @@ class VideoPreparation:
                 default_flow_style=False,
             )
 
+    def _benchmark(self, x):
+        "Calcute chunksize base on cpu parallel power"
+        return max(1, round(len(x) / (self.workers * psutil.cpu_freq().max / 1000) / 4))
+
     def auto(self, data_path: str, save_name: str = False, remake=False) -> None:
         """
         Automatically process data and save it to the specified location.
@@ -573,16 +576,11 @@ class VideoPreparation:
                 return
 
         # Process summary
-        print(f"\n[bold]Summary:[/]")
+        print("\n[bold]Summary:[/]")
         print(f"  Remake: {remake}")
         print(f"  Number of workers: {self.workers}")
         print(f"  Data path: [green]{self.data_path}[/]")
         print(f"  Save path: [green]{self.save_path}[/]")
-
-        # Calcute chunksize base on cpu parallel power
-        benchmark = lambda x: max(
-            1, round(len(x) / (self.workers * psutil.cpu_freq().max / 1000) / 4)
-        )
 
         # Split data
         print("\n[bold][yellow]Splitting data...[/][/]")
@@ -591,7 +589,7 @@ class VideoPreparation:
             self._split_data,
             class_folders,
             max_workers=self.workers,
-            chunksize=benchmark(class_folders),
+            chunksize=self._benchmark(class_folders),
         )
 
         # Generate data
@@ -605,7 +603,7 @@ class VideoPreparation:
             self._frame_generate,
             video_paths,
             max_workers=self.workers,
-            chunksize=benchmark(video_paths),
+            chunksize=self._benchmark(video_paths),
         )
 
         # Save configuration
