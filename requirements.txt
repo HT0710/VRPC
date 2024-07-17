@@ -1,8 +1,16 @@
+# madatories
 numpy==1.26.4
 opencv-python
 torch
 torchvision
 lightning
 
+# others
 rich
+hydra-core
+torchinfo
+rootutils
 psutil
+
+# dev
+tensorboard

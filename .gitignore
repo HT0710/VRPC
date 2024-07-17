@@ -1,3 +1,7 @@
 
-/vrpc/data
+vrpc/data/*
+!vrpc/data/.gitkeep
 *.pyc
+lightning_logs
+vrpc/weights/*
+!vrpc/weights/.gitkeep
