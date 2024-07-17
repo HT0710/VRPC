@@ -8,9 +8,9 @@ lightning
 # others
 rich
 hydra-core
-torchinfo
 rootutils
 psutil
 
 # dev
+torchinfo
 tensorboard

@@ -1,6 +1,5 @@
-from typing import Any, List, Optional
+from typing import List, Optional
 
-from torchinfo import summary
 from torch import nn
 import torch
 
@@ -119,18 +118,3 @@ class VGG(nn.Module):
         x = self.features(x)
         x = self.classifier(x)
         return x
-
-    def summary(self, input_size: tuple = (1, 3, 224, 224)) -> Any:
-        """
-        Generate a summary of the model architecture.
-
-        Parameters
-        ----------
-        input_size : tuple, optional
-            The input tensor size, by default (1, 3, 224, 224)
-
-        Returns
-        -------
-            Model summary.
-        """
-        return summary(self, input_size)
