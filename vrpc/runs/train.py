@@ -1,6 +1,8 @@
 import shutil
 
 import torch.optim.lr_scheduler as ls
+from torchvision import models
+from torchinfo import summary
 import torch.optim as optim
 import torch.nn as nn
 import torch
@@ -18,7 +20,7 @@ traceback.install()
 
 from modules import LitModel, scheduler_with_warmup, custom_callbacks  # noqa: E402
 from modules.data import CustomDataModule  # noqa: E402
-from models import VGG  # noqa: E402
+from models.Custom import BasicStage  # noqa: E402
 
 
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")
@@ -41,7 +43,10 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Define model
-    model = VGG(version="19", num_classes=len(dataset.classes), hidden_dim=256)
+    model = BasicStage(num_classes=len(dataset.classes))
+
+    summary(model, (1, 3, 672, 672))
+    exit()
 
     # Setup loss
     loss = nn.CrossEntropyLoss()
@@ -64,7 +69,13 @@ def main(cfg: DictConfig) -> None:
 
     # Lightning model
     lit_model = LitModel(
-        model, loss, [optimizer], [scheduler], cfg["trainer"]["checkpoint"]
+        model=model,
+        criterion=loss,
+        optimizer=[optimizer],
+        scheduler=[scheduler],
+        checkpoint=cfg["trainer"]["checkpoint"],
+        num_classes=len(dataset.classes),
+        device="auto",
     )
 
     # Save config
@@ -86,7 +97,7 @@ def main(cfg: DictConfig) -> None:
     trainer.fit(lit_model, dataset)
 
     # Testing
-    # trainer.test(lit_model, dataset)
+    trainer.test(lit_model, dataset)
 
 
 if __name__ == "__main__":

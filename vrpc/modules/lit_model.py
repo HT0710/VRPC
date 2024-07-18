@@ -95,28 +95,6 @@ class LitModel(LightningModule):
             on_epoch=True,
         )
 
-    def _shared_step(self, batch: tuple, stage: str) -> torch.Tensor:
-        """
-        Shared step for training, validation, and testing.
-
-        Parameters
-        ----------
-        batch : tuple
-            A tuple containing input data and labels.
-        stage : str
-            The current stage (train, val, or test).
-
-        Returns
-        -------
-        torch.Tensor
-            The computed loss.
-        """
-        X, y = batch
-        y_hat = self(X)
-        loss = self.criterion(y_hat, y)
-        self._log(stage=stage, loss=loss, y_hat=y_hat, y=y)
-        return loss
-
     def configure_optimizers(
         self,
     ) -> Union[
@@ -153,6 +131,28 @@ class LitModel(LightningModule):
             The output of the model.
         """
         return self.model(X)
+
+    def _shared_step(self, batch: tuple, stage: str) -> torch.Tensor:
+        """
+        Shared step for training, validation, and testing.
+
+        Parameters
+        ----------
+        batch : tuple
+            A tuple containing input data and labels.
+        stage : str
+            The current stage (train, val, or test).
+
+        Returns
+        -------
+        torch.Tensor
+            The computed loss.
+        """
+        X, y = batch
+        y_hat = self(X)
+        loss = self.criterion(y_hat, y)
+        self._log(stage=stage, loss=loss, y_hat=y_hat, y=y)
+        return loss
 
     def training_step(self, batch: tuple, batch_idx: int) -> torch.Tensor:
         """
@@ -197,6 +197,10 @@ class LitModel(LightningModule):
             The index of the current batch.
         """
         self._shared_step(batch, "test")
+
+    def predict_step(self, batch):
+        X, y = batch
+        return self(X, y)
 
     def load(
         self, path: str, strict: bool = True, device: str = "auto", verbose: bool = True
