@@ -5,3 +5,5 @@ vrpc/data/*
 lightning_logs
 vrpc/weights/*
 !vrpc/weights/.gitkeep
+/runs
+NOTE.md

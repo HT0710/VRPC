@@ -9,10 +9,10 @@ num_workers: 0.6
 
 # Config dataset
 data:
-  data_path: vrpc/data/rpc-classify_x
+  data_path: vrpc/data/tiny-imagenet-200
   augment_level: 0
-  image_size: [672, 672]
-  data_limit: 0.1
+  image_size: [64, 64]
+  data_limit: null
 
 # Config model
 model:
@@ -21,13 +21,13 @@ model:
 
 # Config scheduler
 scheduler:
-  warmup_epochs: 3
+  warmup_epochs: 5
   start_factor: 0.01
 
 # Config trainer
 trainer:
-  batch_size: 32
+  batch_size: 128
   learning_rate: 1e-3
-  num_epoch: 10
+  num_epoch: 20
   checkpoint: null
-  precision: 32
+  precision: 16-mixed

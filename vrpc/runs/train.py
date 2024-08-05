@@ -1,8 +1,8 @@
 import shutil
 
-import torch.optim.lr_scheduler as ls
 from torchvision import models
-from torchinfo import summary
+from torch.utils.data import DataLoader
+import torch.optim.lr_scheduler as ls
 import torch.optim as optim
 import torch.nn as nn
 import torch
@@ -11,6 +11,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch import seed_everything, Trainer
 
 from omegaconf import DictConfig, open_dict
+from torchinfo import summary
 from rich import traceback
 import rootutils
 import hydra
@@ -18,9 +19,16 @@ import hydra
 rootutils.autosetup()
 traceback.install()
 
-from modules import LitModel, scheduler_with_warmup, custom_callbacks  # noqa: E402
-from modules.data import CustomDataModule  # noqa: E402
-from models.Custom import BasicStage  # noqa: E402
+from modules import LitModel, scheduler_with_warmup, custom_callbacks
+from modules.data import CustomDataModule, DataTransformation as DT
+from modules.data.tinyimagenetloader import (
+    TrainTinyImageNetDataset,
+    TestTinyImageNetDataset,
+    id_dict,
+)
+
+from models.Custom import BasicStage
+from models.CoAtNet import CoAtNet
 
 
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")
@@ -36,17 +44,39 @@ def main(cfg: DictConfig) -> None:
         seed_everything(seed=cfg["set_seed"], workers=True)
 
     # Define dataset
-    dataset = CustomDataModule(
-        **cfg["data"],
+    trainloader = DataLoader(
+        TrainTinyImageNetDataset(transform=DT.AUGMENT_LV0(image_size=64)),
         batch_size=cfg["trainer"]["batch_size"],
-        num_workers=cfg["num_workers"] if torch.cuda.is_available() else 0,
+        num_workers=18,
+        shuffle=True,
     )
+    testloader = DataLoader(
+        TestTinyImageNetDataset(transform=DT.AUGMENT_LV0(image_size=64)),
+        batch_size=cfg["trainer"]["batch_size"],
+        num_workers=18,
+        shuffle=False,
+    )
+    # dataset = CustomDataModule(
+    #     **cfg["data"],
+    #     batch_size=cfg["trainer"]["batch_size"],
+    #     num_workers=cfg["num_workers"] if torch.cuda.is_available() else 0,
+    # )
 
     # Define model
-    model = BasicStage(num_classes=len(dataset.classes))
+    # model = CoAtNet(in_ch=3, image_size=64, num_classes=len(id_dict))
+    model = BasicStage(num_classes=len(id_dict))
+    # model = models.VisionTransformer(
+    #     patch_size=16,
+    #     num_layers=4,
+    #     num_heads=4,
+    #     hidden_dim=256,
+    #     mlp_dim=256,
+    #     image_size=224,
+    #     num_classes=len(id_dict),
+    # )
 
-    summary(model, (1, 3, 672, 672))
-    exit()
+    # summary(model, (1, 3, 64, 64))
+    # exit()
 
     # Setup loss
     loss = nn.CrossEntropyLoss()
@@ -74,7 +104,7 @@ def main(cfg: DictConfig) -> None:
         optimizer=[optimizer],
         scheduler=[scheduler],
         checkpoint=cfg["trainer"]["checkpoint"],
-        num_classes=len(dataset.classes),
+        num_classes=len(id_dict),
         device="auto",
     )
 
@@ -89,15 +119,15 @@ def main(cfg: DictConfig) -> None:
     trainer = Trainer(
         max_epochs=cfg["trainer"]["num_epoch"],
         precision=cfg["trainer"]["precision"],
-        callbacks=custom_callbacks(),
         logger=TensorBoardLogger(save_dir="."),
+        callbacks=custom_callbacks(),
     )
 
     # Training
-    trainer.fit(lit_model, dataset)
+    trainer.fit(lit_model, trainloader, testloader)
 
     # Testing
-    trainer.test(lit_model, dataset)
+    # trainer.test(lit_model, dataset)
 
 
 if __name__ == "__main__":

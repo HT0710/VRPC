@@ -79,7 +79,6 @@ def custom_callbacks() -> List[cb.Callback]:
 
     callback_map = {
         "verbose": PrintTrainResult(),
-        "model_summary": cb.RichModelSummary(),
         "progress_bar": cb.RichProgressBar(),
         "lr_monitor": cb.LearningRateMonitor("epoch"),
         "enable_checkpoint": cb.ModelCheckpoint(**cfg["checkpoint"]),

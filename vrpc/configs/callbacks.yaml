@@ -17,7 +17,7 @@ lr_monitor: true
 checkpoint:
   monitor: val/loss
   save_weights_only: true
-  save_top_k: 2
+  save_top_k: 1
   save_last: true
 enable_checkpoint: true
 
