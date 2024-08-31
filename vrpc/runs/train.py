@@ -1,14 +1,16 @@
 import shutil
 
-from torchvision import models
+from lightning.pytorch.utilities.types import EVAL_DATALOADERS
+from torchvision import models, datasets
 from torch.utils.data import DataLoader
 import torch.optim.lr_scheduler as ls
 import torch.optim as optim
 import torch.nn as nn
 import torch
 
+from lightning.pytorch.tuner import Tuner
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch import seed_everything, Trainer
+from lightning.pytorch import seed_everything, Trainer, LightningDataModule
 
 from omegaconf import DictConfig, open_dict
 from torchinfo import summary
@@ -19,16 +21,56 @@ import hydra
 rootutils.autosetup()
 traceback.install()
 
+from torchview import draw_graph
 from modules import LitModel, scheduler_with_warmup, custom_callbacks
 from modules.data import CustomDataModule, DataTransformation as DT
 from modules.data.tinyimagenetloader import (
     TrainTinyImageNetDataset,
     TestTinyImageNetDataset,
-    id_dict,
+    id_dict as classes,
 )
 
+
 from models.Custom import BasicStage
-from models.CoAtNet import CoAtNet
+from models.convnext import convnext_tiny
+
+
+class LitDataModule(LightningDataModule):
+    def __init__(self, image_size, batch_size, num_workers):
+        super().__init__()
+        self.image_size = image_size
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+
+    @property
+    def classes(self):
+        return classes
+
+    def train_dataloader(self):
+        return DataLoader(
+            TrainTinyImageNetDataset(
+                transform=DT.AUGMENT_LV1(image_size=self.image_size)
+            ),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            prefetch_factor=1,
+            pin_memory=True,
+            shuffle=True,
+            drop_last=True,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            TestTinyImageNetDataset(
+                transform=DT.AUGMENT_LV0(image_size=self.image_size)
+            ),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            prefetch_factor=1,
+            pin_memory=True,
+            shuffle=False,
+            drop_last=True,
+        )
 
 
 @hydra.main(config_path="../configs", config_name="train", version_base="1.3")
@@ -44,18 +86,29 @@ def main(cfg: DictConfig) -> None:
         seed_everything(seed=cfg["set_seed"], workers=True)
 
     # Define dataset
-    trainloader = DataLoader(
-        TrainTinyImageNetDataset(transform=DT.AUGMENT_LV0(image_size=64)),
-        batch_size=cfg["trainer"]["batch_size"],
-        num_workers=18,
-        shuffle=True,
+    dataset = LitDataModule(
+        image_size=64, batch_size=cfg["trainer"]["batch_size"], num_workers=18
     )
-    testloader = DataLoader(
-        TestTinyImageNetDataset(transform=DT.AUGMENT_LV0(image_size=64)),
-        batch_size=cfg["trainer"]["batch_size"],
-        num_workers=18,
-        shuffle=False,
-    )
+    # trainset = datasets.CIFAR10(
+    #     root="vrpc/data",
+    #     train=True,
+    #     download=True,
+    #     transform=DT.AUGMENT_LV1(image_size=64),
+    # )
+    # trainloader = DataLoader(
+    #     trainset, batch_size=cfg["trainer"]["batch_size"], shuffle=True, num_workers=18
+    # )
+
+    # testset = datasets.CIFAR10(
+    #     root="vrpc/data",
+    #     train=False,
+    #     download=True,
+    #     transform=DT.AUGMENT_LV0(image_size=64),
+    # )
+    # testloader = DataLoader(
+    #     testset, batch_size=cfg["trainer"]["batch_size"], shuffle=False, num_workers=18
+    # )
+
     # dataset = CustomDataModule(
     #     **cfg["data"],
     #     batch_size=cfg["trainer"]["batch_size"],
@@ -63,17 +116,20 @@ def main(cfg: DictConfig) -> None:
     # )
 
     # Define model
-    # model = CoAtNet(in_ch=3, image_size=64, num_classes=len(id_dict))
-    model = BasicStage(num_classes=len(id_dict))
-    # model = models.VisionTransformer(
-    #     patch_size=16,
-    #     num_layers=4,
-    #     num_heads=4,
-    #     hidden_dim=256,
-    #     mlp_dim=256,
-    #     image_size=224,
-    #     num_classes=len(id_dict),
+    model = BasicStage(num_classes=len(dataset.classes), image_size=64)
+    # model = convnext_tiny(num_classes=len(dataset.classes))
+    # model = models.vit_b_16(num_classes=len(dataset.classes), dropout=0.1)
+
+    # show = draw_graph(
+    #     model,
+    #     input_size=(512, 3, 64, 64),
+    #     device="meta",
+    #     roll=True,
+    #     save_graph=True,
+    #     expand_nested=True,
     # )
+    # show.visual_graph
+    # exit()
 
     # summary(model, (1, 3, 64, 64))
     # exit()
@@ -83,7 +139,7 @@ def main(cfg: DictConfig) -> None:
 
     # Setup optimizer
     optimizer = optim.AdamW(
-        model.parameters(),
+        params=model.parameters(),
         lr=cfg["trainer"]["learning_rate"],
         weight_decay=cfg["trainer"]["learning_rate"],
     )
@@ -104,8 +160,8 @@ def main(cfg: DictConfig) -> None:
         optimizer=[optimizer],
         scheduler=[scheduler],
         checkpoint=cfg["trainer"]["checkpoint"],
-        num_classes=len(id_dict),
         device="auto",
+        num_classes=len(dataset.classes),
     )
 
     # Save config
@@ -121,10 +177,17 @@ def main(cfg: DictConfig) -> None:
         precision=cfg["trainer"]["precision"],
         logger=TensorBoardLogger(save_dir="."),
         callbacks=custom_callbacks(),
+        gradient_clip_val=0.5,
     )
 
+    # Lightning tuner
+    # tuner = Tuner(trainer)
+
+    # Auto-scale batch size by growing it exponentially
+    # tuner.scale_batch_size(lit_model, datamodule=dataset)
+
     # Training
-    trainer.fit(lit_model, trainloader, testloader)
+    trainer.fit(lit_model, dataset)
 
     # Testing
     # trainer.test(lit_model, dataset)

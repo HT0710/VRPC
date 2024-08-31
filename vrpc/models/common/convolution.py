@@ -2,6 +2,46 @@ from torch.nn import functional as F
 import torch.nn as nn
 import torch
 
+from .attention import ChannelAttention
+
+
+def channel_shuffle(x: torch.Tensor, groups: int) -> torch.Tensor:
+    batchsize, num_channels, height, width = x.size()
+    channels_per_group = num_channels // groups
+
+    # reshape
+    x = x.view(batchsize, groups, channels_per_group, height, width)
+
+    x = torch.transpose(x, 1, 2).contiguous()
+
+    # flatten
+    x = x.view(batchsize, num_channels, height, width)
+
+    return x
+
+
+def dim_shuffle(x: torch.Tensor, dim: int) -> torch.Tensor:
+    permutation = torch.randperm(x.size(dim), device=x.device)
+
+    x = x.index_select(dim, permutation)
+
+    return x
+
+
+def drop_path(x: torch.Tensor, keep_prob: float = 1.0, inplace: bool = False):
+    if keep_prob == 1.0 or not x.requires_grad:
+        return x
+
+    mask_shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+    mask = x.new_empty(mask_shape).bernoulli_(keep_prob)
+    mask.div_(keep_prob)
+
+    if inplace:
+        x.mul_(mask)
+    else:
+        x = x * mask
+    return x
+
 
 class BasicConvBlock(nn.Module):
     def __init__(
@@ -11,70 +51,129 @@ class BasicConvBlock(nn.Module):
         kernel: int,
         stride: int = 1,
         bias: bool = False,
+        normalize: bool = True,
+        activation: nn.Module = nn.GELU(),
     ) -> None:
         super().__init__()
         self.conv = nn.Conv2d(
-            in_channels, out_channels, kernel, stride, kernel // 2, bias=bias
+            in_channels, out_channels, kernel, stride, (kernel - 1) // 2, bias=bias
         )
-        self.norm = nn.BatchNorm2d(out_channels)
-        self.act = nn.GELU()
+        self.norm = nn.BatchNorm2d(out_channels) if normalize else nn.Identity()
+        self.act = activation
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv(x)
         x = self.norm(x)
-        x = self.act(x)
+        if self.act:
+            x = self.act(x)
         return x
 
 
-class DualConvBlock(nn.Module):
-    def __init__(
-        self, in_channels: int, out_channels: int, kernel: int, stride: int = 1
-    ) -> None:
+class CustomConvBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int) -> None:
+        super().__init__()
+
+        _hidden_dims = in_channels * 2
+
+        self.conv1 = BasicConvBlock(in_channels, _hidden_dims, 3, activation=None)
+        self.conv2 = nn.Conv2d(_hidden_dims, _hidden_dims, 3, padding=1, bias=False)
+        self.conv3 = nn.Conv2d(_hidden_dims, _hidden_dims, 3, padding=1, bias=False)
+        self.conv4 = BasicConvBlock(_hidden_dims, out_channels, 3, activation=None)
+
+        self.act = nn.GELU()
+        self.norm = nn.BatchNorm2d(out_channels)
+        self.c_att = ChannelAttention(out_channels, reduce_ratio=16, dropout=0.1)
+
+        self.shortcut = nn.Conv2d(in_channels, out_channels, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        shortcut = self.shortcut(x)
+        x = y = self.conv1(x)
+        x = self.act(x)
+        x = z = self.conv2(x)
+        x = self.act(x)
+        x = self.conv3(x + y)
+        x = self.act(x)
+        x = self.conv4(x + y + z)
+        x = self.act(x + shortcut)
+        x = self.c_att(x)
+        x = self.norm(x)
+        return x
+
+
+class ConvNeXtBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, expansion: int = 8) -> None:
         super().__init__()
         self.conv1 = nn.Sequential(
             nn.Conv2d(
-                in_channels,
-                out_channels // 2,
-                kernel,
-                stride,
-                kernel // 2,
-                bias=False,
+                in_channels, in_channels, 7, padding=3, groups=in_channels, bias=False
             ),
-            nn.BatchNorm2d(out_channels // 2),
+            nn.BatchNorm2d(in_channels),
         )
         self.conv2 = nn.Sequential(
-            nn.Conv2d(
-                out_channels // 2,
-                out_channels,
-                kernel,
-                padding=kernel // 2,
-                bias=False,
-            ),
+            nn.Conv2d(in_channels, in_channels * expansion, 1, bias=False),
+            nn.BatchNorm2d(in_channels * expansion),
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(in_channels * expansion, out_channels, 1, bias=False),
             nn.BatchNorm2d(out_channels),
         )
         self.act = nn.GELU()
 
-        self.shortcut = nn.Sequential()
-        if stride != 1 or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(out_channels),
-            )
+        self.shortcut = nn.Sequential(
+            nn.Conv2d(
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                bias=False,
+            ),
+            nn.BatchNorm2d(out_channels),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         identity = x
         x = self.conv1(x)
         x = self.act(x)
         x = self.conv2(x)
+        x = self.act(x)
+        x = self.conv3(x)
         x += self.shortcut(identity)
         x = self.act(x)
         return x
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride, 1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.act = nn.GELU()
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=stride, bias=False
+                ),
+                nn.BatchNorm2d(out_channels),
+            )
+
+    def forward(self, x):
+        residual = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.act(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        out += self.shortcut(residual)
+        out = self.act(out)
+
+        return out
 
 
 class BottleneckBlock(nn.Module):
@@ -167,49 +266,6 @@ class InvertedBottleneckBlock(nn.Module):
             return self.conv(x)
 
 
-class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1):
-        super().__init__()
-        self.conv1 = nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size=3,
-            stride=stride,
-            padding=1,
-            bias=False,
-        )
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.act = nn.GELU()
-        self.conv2 = nn.Conv2d(
-            out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False
-        )
-        self.bn2 = nn.BatchNorm2d(out_channels)
-
-        self.shortcut = nn.Sequential()
-        if stride != 1 or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(
-                    in_channels, out_channels, kernel_size=1, stride=stride, bias=False
-                ),
-                nn.BatchNorm2d(out_channels),
-            )
-
-    def forward(self, x):
-        residual = x
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.act(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        out += self.shortcut(residual)
-        out = self.act(out)
-
-        return out
-
-
 class SEBlock(nn.Module):
     def __init__(self, channel, reduction=16):
         super().__init__()
@@ -261,7 +317,7 @@ class MBConvBlock(nn.Module):
         self._depthwise_conv = nn.Conv2d(
             oup,
             oup,
-            kernel_size=ksize,
+            kernel_size=self._kernel_size,
             stride=stride,
             groups=oup,
             bias=False,
@@ -299,11 +355,3 @@ class MBConvBlock(nn.Module):
         if self._stride == 1 and self._input_filters == self._output_filters:
             x = x + inputs
         return x
-
-
-if __name__ == "__main__":
-    torch.manual_seed(24)
-    input = torch.randn(1, 3, 112, 112)
-    mbconv = MBConvBlock(ksize=3, input_filters=3, output_filters=3)
-    out = mbconv(input)
-    print(out.shape)

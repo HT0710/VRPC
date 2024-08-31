@@ -1,10 +1,11 @@
 from collections import OrderedDict
 from functools import partial
+import math
 from torch.nn import functional as F
 import torch.nn as nn
 import torch
 
-from .mlp import AttMLPBlock
+from .mlp import MLPBlock, AttMLPBlock
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -141,25 +142,47 @@ class Encoder(nn.Module):
 
 
 class ChannelAttention(nn.Module):
-    def __init__(self, in_channels, reduce_ratio=16, dropout=0.1):
+    def __init__(self, in_channels, reduce_ratio=16, dropout: float = 0.0):
         super().__init__()
         self.max_pool = nn.AdaptiveMaxPool2d(1)
 
-        self.fc = AttMLPBlock(
+        self.fc = MLPBlock(
             in_channels, in_channels // reduce_ratio, in_channels, dropout
         )
 
-        self.sigmoid = nn.Sigmoid()
-        self.dropout = nn.Dropout(dropout)
+    def _sigmoid(self, x):
+        return 2 / (1 + torch.exp(-x))
 
     def forward(self, x):
         b, c, _, _ = x.size()
         out = self.max_pool(x).view(b, c)
         out = self.fc(out)
-        out = self.sigmoid(out)
-        out = self.dropout(out)
+        out = self._sigmoid(out)
         out = x * out.view(b, c, 1, 1)
         return out
+
+
+class ECAModule(nn.Module):
+    def __init__(self, channels, gamma=2, b=1):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+
+        t = int(abs((math.log2(channels) / gamma) + b / gamma))
+        k_size = t if t % 2 else t + 1
+
+        self.conv = nn.Conv1d(
+            1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        y = self.avg_pool(x)
+
+        y = self.conv(y.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
+
+        y = self.sigmoid(y)
+
+        return x * y.expand_as(x)
 
 
 class SpatialAttention(nn.Module):

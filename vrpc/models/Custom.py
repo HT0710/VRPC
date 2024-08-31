@@ -3,116 +3,105 @@ import math
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
+import cv2
 
 from .common.attention import ScaledDotProductAttention, ChannelAttention, Encoder
-from .common.convolution import BasicConvBlock, DualConvBlock, BottleneckBlock
+from .common.convolution import BasicConvBlock, CustomConvBlock
+from .common.mlp import MLPBlock
 
 
 class BasicStage(nn.Module):
-    def __init__(self, num_classes: int) -> None:
+    def __init__(self, num_classes: int, image_size: int) -> None:
         super().__init__()
-        self.maxpool2d = nn.MaxPool2d(2, stride=2)
-        self.conv1 = DualConvBlock(in_channels=3, out_channels=16, kernel=3)
-        self.expand1 = nn.Conv2d(3, 16, 1)
-        self.conv2 = DualConvBlock(in_channels=16, out_channels=32, kernel=3)
-        self.expand2 = nn.Conv2d(3, 32, 1)
-        self.conv3 = DualConvBlock(in_channels=32, out_channels=64, kernel=3)
-        self.expand3 = nn.Conv2d(3, 64, 1)
-        self.conv4 = DualConvBlock(in_channels=64, out_channels=128, kernel=3)
-        self.expand4 = nn.Conv2d(3, 128, 1)
-        self.c_att = ChannelAttention(in_channels=128, dropout=0)
-        self.pos_embedding = nn.Parameter(torch.empty(1, 49, 128).normal_(std=0.02))
-        self.s_att = Encoder(
-            seq_length=49,
-            num_layers=3,
-            num_heads=2,
-            hidden_dim=128,
-            mlp_dim=256,
-            attention_dropout=0,
-            dropout=0,
-        )
-        self.classifier = nn.Sequential(
-            nn.Linear(128, 256),
+        self.num_classes = num_classes
+
+        self.avgpool = nn.AvgPool2d(2, 2)
+        self.shrink = nn.AdaptiveAvgPool2d(1)
+
+        self.conv1 = BasicConvBlock(in_channels=3, out_channels=8, kernel=3)
+        self.expand1 = nn.Conv2d(3, 8, 1)
+        self.linear1 = nn.Sequential(
+            nn.LayerNorm(8),
+            nn.Linear(8, 32, bias=False),
             nn.GELU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, num_classes),
+        )
+
+        self.conv2 = CustomConvBlock(in_channels=8, out_channels=32)
+        self.expand2 = nn.Conv2d(3, 32, 1)
+        self.linear2 = nn.Sequential(
+            nn.LayerNorm(32),
+            nn.Linear(32, 128, bias=False),
+            nn.GELU(),
+        )
+
+        self.conv3 = CustomConvBlock(in_channels=32, out_channels=128)
+        self.expand3 = nn.Conv2d(3, 128, 1)
+        self.linear3 = nn.Sequential(
+            nn.LayerNorm(128),
+            nn.Linear(128, 512, bias=False),
+            nn.GELU(),
+        )
+
+        self.conv4 = CustomConvBlock(in_channels=128, out_channels=512)
+        self.expand4 = nn.Conv2d(3, 512, 1)
+        self.linear4 = nn.Sequential(
+            nn.LayerNorm(512),
+            nn.Linear(512, 512 * 3 * 3, bias=False),
+            nn.GELU(),
+        )
+
+        # self.adapt_avgpool = nn.AdaptiveAvgPool2d(image_size // 16)
+        # self.s_att = Encoder(
+        #     seq_length=(image_size // 16) ** 2,
+        #     num_layers=1,
+        #     num_heads=4,
+        #     hidden_dim=512,
+        #     mlp_dim=64,
+        # )
+
+        self.classifier = nn.Sequential(
+            nn.Dropout(0.2, inplace=True),
+            nn.Linear(512 * 3 * 3, num_classes),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.adaptive_avg_pool2d(x, 112)
-        identity = x
-
+        identity = self.avgpool(x)
         x = self.conv1(x)
-        x = self.maxpool2d(x)
-        identity = self.maxpool2d(identity)
+        x = self.avgpool(x)
+        l1 = self.shrink(x)
+        l1 = self.linear1(torch.flatten(l1, 1))
         x += self.expand1(identity)
 
+        identity = self.avgpool(identity)
         x = self.conv2(x)
-        x = self.maxpool2d(x)
-        identity = self.maxpool2d(identity)
+        x = self.avgpool(x)
+        l2 = self.shrink(x)
+        l2 = self.linear2(torch.flatten(l2, 1) + l1)
         x += self.expand2(identity)
 
+        identity = self.avgpool(identity)
         x = self.conv3(x)
-        x = self.maxpool2d(x)
-        identity = self.maxpool2d(identity)
+        x = self.avgpool(x)
+        l3 = self.shrink(x)
+        l3 = self.linear3(torch.flatten(l3, 1) + l2)
         x += self.expand3(identity)
 
+        identity = self.avgpool(identity)
         x = self.conv4(x)
-        x = self.maxpool2d(x)
-        identity = self.maxpool2d(identity)
+        x = self.avgpool(x)
+        l4 = self.shrink(x)
+        l4 = self.linear4(torch.flatten(l4, 1) + l3)
         x += self.expand4(identity)
 
-        x = self.c_att(x)
-        x = torch.flatten(x, 2).transpose(1, 2)
-        x += self.pos_embedding
-        x = self.s_att(x).transpose(1, 2)
+        # y = self.adapt_avgpool(x)
+        # y = torch.flatten(y, 2).transpose(1, 2)
+        # y = self.s_att(y).transpose(1, 2)
+        # y = F.adaptive_avg_pool1d(y, 3)
+        # y = torch.flatten(y, 1)
 
-        x = F.adaptive_avg_pool1d(x, 1)
+        x = F.adaptive_avg_pool2d(x, 3)
         x = torch.flatten(x, 1)
-        x = self.classifier(x)
 
-        return x
+        x = self.classifier(x + l4)
 
-
-class BasicStage0(nn.Module):
-    def __init__(self, num_classes: int, image_size: int = 224) -> None:
-        super().__init__()
-        self.image_size = image_size
-        self.adapool = nn.AdaptiveAvgPool2d(111)
-        self.maxpool2d = nn.MaxPool2d(2, stride=2)
-        self.maxpool1d = nn.MaxPool1d(2, stride=2)
-        self.conv1 = BasicConvBlock(in_channels=27, out_channels=32, kernel=1)
-        self.c_att1 = ChannelAttention(in_channels=32, dropout=0)
-        self.conv2 = BasicConvBlock(in_channels=32, out_channels=64, kernel=1)
-        self.c_att2 = ChannelAttention(in_channels=64, dropout=0)
-        self.conv3 = BasicConvBlock(in_channels=64, out_channels=128, kernel=1)
-        self.c_att3 = ChannelAttention(in_channels=128, dropout=0)
-        self.s_att = ScaledDotProductAttention(embed_dim=128, num_heads=8, dropout=0)
-        self.fc = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(128 * 16, 256),
-            nn.GELU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, num_classes),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.adapool(x)
-        B, C, H, W = x.shape
-        num_patches = 9
-        patch_size = int(math.sqrt(H * W / num_patches))
-        x = x.unfold(2, patch_size, patch_size).unfold(3, patch_size, patch_size)
-        x = x.contiguous().view(B, num_patches * C, patch_size, patch_size)
-        x = self.conv1(x)
-        x = self.c_att1(x)
-        x = self.maxpool2d(x)
-        x = self.conv2(x)
-        x = self.c_att2(x)
-        x = self.maxpool2d(x)
-        x = self.conv3(x)
-        x = self.c_att3(x)
-        x = self.maxpool2d(x)
-        x = x.reshape(*x.shape[:2], -1).transpose(1, 2)
-        x = self.s_att(x, x, x).transpose(1, 2)
-        x = self.fc(x)
         return x

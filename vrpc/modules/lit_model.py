@@ -1,4 +1,5 @@
 from typing import Dict, List, Tuple, Union
+from datetime import datetime
 import os
 
 from torchmetrics.functional import accuracy
@@ -57,17 +58,19 @@ class LitModel(LightningModule):
         self.criterion = criterion
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.num_classes = num_classes or self._get_num_classes()
+        self._num_classes = num_classes
         if checkpoint:
             self.load(checkpoint, device=device)
 
-    def _get_num_classes(self):
-        if not hasattr(self.model, "num_classes"):
-            raise AttributeError(
-                'The input model does not provide num_classes. "num_classes" parameter cannot be None.'
-            )
+    @property
+    def learning_rate(self) -> float:
+        return self.optimizer[0].param_groups[0]["lr"]
 
-        return self.model.num_classes
+    @property
+    def num_classes(self) -> int:
+        if not hasattr(self.model, "num_classes") and not self._num_classes:
+            raise AttributeError("The input model does not provide num_classes.")
+        return self._num_classes or self.model.num_classes
 
     def _log(
         self, stage: str, loss: torch.Tensor, y_hat: torch.Tensor, y: torch.Tensor
@@ -95,9 +98,7 @@ class LitModel(LightningModule):
             on_epoch=True,
         )
 
-    def configure_optimizers(
-        self,
-    ) -> Union[
+    def configure_optimizers(self) -> Union[
         List[optim.Optimizer],
         Tuple[List[optim.Optimizer], List[lr_scheduler.LRScheduler]],
     ]:

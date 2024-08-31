@@ -54,11 +54,7 @@ class CustomDataModule(LightningDataModule):
 
     @staticmethod
     def _check_limit(value: Optional[float]) -> Optional[float]:
-        if not value or value in [0, 1]:
-            return None
-        if not (0 < value < 1):
-            raise ValueError("The limit value must be a float between 0 and 1.")
-        return float(value)
+        return 1 if not value or (1 < value < 0) else value
 
     def _limit_data(self, data: Dataset) -> Subset:
         return random_split(
@@ -68,14 +64,14 @@ class CustomDataModule(LightningDataModule):
     def _summary(self) -> None:
         table = Table(title="[bold]Sets Distribution[/]")
         table.add_column("Set", style="cyan", no_wrap=True)
-        table.add_column("Count", justify="right", style="magenta")
-        table.add_column("Rate", justify="right", style="green")
+        table.add_column("Total", justify="right", style="magenta")
+        table.add_column("Split", justify="right", style="green")
         for set_name, set_len in [
             ("Train", len(self.train_set)),
             ("Val", len(self.val_set)),
             ("Test", len(self.test_set)),
         ]:
-            table.add_row(set_name, f"{set_len:,}", f"{set_len/len(self.dataset):.1%}")
+            table.add_row(set_name, f"{set_len:,}", f"{set_len/len(self.dataset):.0%}")
         print(table)
         output = [
             (

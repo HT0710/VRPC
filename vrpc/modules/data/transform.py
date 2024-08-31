@@ -86,7 +86,7 @@ class DataTransformation:
                     tuple_handler(image_size, max_dim=2), antialias=True
                 ),
                 T.RandomHorizontalFlip(p=0.1),
-                T.RandomRotation(15),
+                T.RandomRotation(10),
                 T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
                 T.ToTensor(),
                 T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -111,7 +111,7 @@ class DataTransformation:
                     tuple_handler(image_size, max_dim=2), antialias=True
                 ),
                 T.RandomHorizontalFlip(p=0.2),
-                T.RandomRotation(30),
+                T.RandomRotation(25),
                 T.GaussianBlur(3),
                 T.RandomPerspective(0.2, p=0.2),
                 T.RandomAutocontrast(p=0.2),
@@ -142,7 +142,7 @@ class DataTransformation:
                     tuple_handler(image_size, max_dim=2), antialias=True
                 ),
                 T.RandomHorizontalFlip(p=0.35),
-                T.RandomRotation(60),
+                T.RandomRotation(50),
                 T.GaussianBlur(5),
                 T.RandomPerspective(0.35, p=0.35),
                 T.RandomAutocontrast(p=0.35),
@@ -173,7 +173,7 @@ class DataTransformation:
                     tuple_handler(image_size, max_dim=2), antialias=True
                 ),
                 T.RandomHorizontalFlip(p=0.5),
-                T.RandomRotation(90),
+                T.RandomRotation(75),
                 T.GaussianBlur(7),
                 T.RandomPerspective(0.5, p=0.5),
                 T.RandomAutocontrast(p=0.5),

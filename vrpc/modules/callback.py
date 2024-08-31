@@ -1,13 +1,16 @@
-from typing import List, Union
-from rich import print
+from datetime import datetime
+from typing import Any, List, Union, Mapping
 
 from lightning.pytorch import Trainer, LightningModule
 import lightning.pytorch.callbacks as cb
 
+from rich import print
+from torch import Tensor
+
 from .utils import yaml_handler
 
 
-class PrintTrainResult(cb.Callback):
+class PrintResult(cb.Callback):
     def __init__(self) -> None:
         super().__init__()
         self.prev = {}
@@ -23,17 +26,24 @@ class PrintTrainResult(cb.Callback):
         prev_value = self.prev.get(name, value)
         self.prev[name] = value
 
+        # Check current vs previous
         if value > prev_value:
-            trend = f"[{'green' if up_green else 'red'}]▲[/]"
+            trend = "green" if up_green else "red"
         elif value < prev_value:
-            trend = f"[{'red' if up_green else 'green'}]▼[/]"
+            trend = "red" if up_green else "green"
         else:
-            trend = "[grey]-[/]"
+            trend = "grey"
 
         # Format the value
         formatted_value = f"{value:{format_spec}}"
 
-        return f"{trend} {formatted_value}"
+        return f"[{trend}]{formatted_value}[/]"
+
+    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        lr_sequence = ",".join(f"lr{i}" for i, _ in enumerate(trainer.optimizers))
+
+        with open(f"{trainer.logger.log_dir}/results.csv", "a") as f:
+            f.write(f"Epoch,{lr_sequence},train_loss,train_acc,val_loss,val_acc\n")
 
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         epoch = trainer.current_epoch
@@ -64,6 +74,16 @@ class PrintTrainResult(cb.Callback):
 
         print(" ".join(output))
 
+        with open(f"{trainer.logger.log_dir}/results.csv", "a") as f:
+            lr_values = ",".join(
+                f"{optim.param_groups[0]['lr']:.2e}" for optim in trainer.optimizers
+            )
+            f.write(
+                f"{epoch},{lr_values},"
+                f"{results['train/loss']:.5f},{results['train/accuracy']:.4f},"
+                f"{results['val/loss']:.5f},{results['val/accuracy']:.4f}\n"
+            )
+
 
 def custom_callbacks() -> List[cb.Callback]:
     """
@@ -75,18 +95,13 @@ def custom_callbacks() -> List[cb.Callback]:
         A list of configured PyTorch Lightning callback objects.
     """
     cfg = yaml_handler("vrpc/configs/callbacks.yaml")
-    callbacks = []
 
     callback_map = {
-        "verbose": PrintTrainResult(),
+        "verbose": PrintResult(),
         "progress_bar": cb.RichProgressBar(),
         "lr_monitor": cb.LearningRateMonitor("epoch"),
         "enable_checkpoint": cb.ModelCheckpoint(**cfg["checkpoint"]),
         "enable_early_stopping": cb.EarlyStopping(**cfg["early_stopping"]),
     }
 
-    for key, callback in callback_map.items():
-        if cfg.get(key, False):
-            callbacks.append(callback)
-
-    return callbacks
+    return [callback for key, callback in callback_map.items() if cfg.get(key, False)]
