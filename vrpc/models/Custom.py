@@ -1,22 +1,25 @@
-import math
-
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
-import cv2
 
-from .common.attention import ScaledDotProductAttention, ChannelAttention, Encoder
 from .common.convolution import BasicConvBlock, CustomConvBlock
-from .common.mlp import MLPBlock
 
 
 class BasicStage(nn.Module):
-    def __init__(self, num_classes: int, image_size: int) -> None:
+    def __init__(self, num_classes: int) -> None:
         super().__init__()
         self.num_classes = num_classes
 
         self.avgpool = nn.AvgPool2d(2, 2)
         self.shrink = nn.AdaptiveAvgPool2d(1)
+
+        # drop resolution faster to replace last avg_pool
+
+        # used Conv layer as Linear
+
+        # more research on layer depth
+
+        # make large resolution faster
 
         self.conv1 = BasicConvBlock(in_channels=3, out_channels=8, kernel=3)
         self.expand1 = nn.Conv2d(3, 8, 1)

@@ -116,7 +116,7 @@ def main(cfg: DictConfig) -> None:
     # )
 
     # Define model
-    model = BasicStage(num_classes=len(dataset.classes), image_size=64)
+    model = BasicStage(num_classes=len(dataset.classes))
     # model = convnext_tiny(num_classes=len(dataset.classes))
     # model = models.vit_b_16(num_classes=len(dataset.classes), dropout=0.1)
 
