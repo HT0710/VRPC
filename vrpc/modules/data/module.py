@@ -1,13 +1,13 @@
-from typing import List, Optional, Tuple, Union
-from pathlib import Path
 import os
+from pathlib import Path
+from typing import List, Optional, Tuple, Union
 
-from torch.utils.data import Dataset, DataLoader, ConcatDataset, Subset, random_split
+import torch
 from lightning.pytorch import LightningDataModule
-from torchvision.datasets import ImageFolder
-
-from rich.table import Table
 from rich import print
+from rich.table import Table
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, Subset, random_split
+from torchvision.datasets import ImageFolder
 
 from modules.data import DataTransformation
 from modules.utils import workers_handler
@@ -22,7 +22,7 @@ class CustomDataModule(LightningDataModule):
         image_size: Union[Tuple[int, int], List] = (224, 224),
         data_limit: Optional[float] = None,
         num_workers: int = 0,
-        pin_memory: bool = True,
+        pin_memory: bool = torch.cuda.is_available(),
     ) -> None:
         """
         Custom Data Module for PyTorch Lightning
@@ -34,7 +34,7 @@ class CustomDataModule(LightningDataModule):
             image_size (tuple, optional): Size of the input images. Default: (224, 224)
             data_limit (float, optional): Limit for the size of the dataset (0 -> 1.0). Default: None
             num_workers (int, optional): Number of data loading workers. Default: 0
-            pin_memory (bool, optional): Whether to pin memory for faster data transfer. Default: True
+            pin_memory (bool, optional): Whether to pin memory for faster data transfer. Default: True if using GPU else False
         """
         super().__init__()
         self.data_path = Path(data_path)
@@ -45,6 +45,7 @@ class CustomDataModule(LightningDataModule):
             "batch_size": batch_size,
             "num_workers": workers_handler(num_workers),
             "pin_memory": pin_memory,
+            "drop_last": True,
         }
 
     @property
@@ -54,9 +55,12 @@ class CustomDataModule(LightningDataModule):
 
     @staticmethod
     def _check_limit(value: Optional[float]) -> Optional[float]:
-        return 1 if not value or (1 < value < 0) else value
+        "Check input value for limit."
+        if isinstance(value, float) and 0 < value < 1:
+            return value
 
     def _limit_data(self, data: Dataset) -> Subset:
+        "Return a subset of data based on limit value."
         return random_split(
             dataset=data, lengths=(self.data_limit, 1 - self.data_limit)
         )[0]
@@ -71,17 +75,21 @@ class CustomDataModule(LightningDataModule):
             ("Val", len(self.val_set)),
             ("Test", len(self.test_set)),
         ]:
-            table.add_row(set_name, f"{set_len:,}", f"{set_len/len(self.dataset):.0%}")
+            table.add_row(
+                set_name, f"{set_len:,}", f"{set_len / len(self.dataset):.0%}"
+            )
         print(table)
         output = [
             (
-                f"[bold]Number of data:[/] {len(self.dataset):,}"
-                + f" ([red]{self.data_limit:.0%}[/])"
-                if self.data_limit != 1
-                else ""
+                f"[bold]Number of data[/]: {len(self.dataset):,}"
+                + (
+                    f" ([red]{self.data_limit:.0%}[/])"
+                    if self.data_limit and self.data_limit != 1
+                    else ""
+                )
             ),
-            f"[bold]Number of classes:[/] {len(self.classes):,}",
-            f"[bold]Data path:[/] [green]{self.data_path}[/]",
+            f"[bold]Number of classes[/]: {len(self.classes):,}",
+            f"[bold]Data path[/]: [green]{self.data_path}[/]",
         ]
         print("\n".join(output))
 
