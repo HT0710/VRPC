@@ -1,15 +1,13 @@
-from typing import Dict, List, Tuple, Union
-from datetime import datetime
 import os
+from typing import Dict, List, Tuple, Union
 
-from torchmetrics.functional import accuracy
-import torch.optim.lr_scheduler as lr_scheduler
-import torch.optim as optim
-import torch.nn as nn
 import torch
-
+import torch.nn as nn
+import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
 from lightning.pytorch import LightningModule
 from rich import print
+from torchmetrics.functional import accuracy
 
 from .utils import device_handler
 
@@ -69,7 +67,13 @@ class LitModel(LightningModule):
     @property
     def num_classes(self) -> int:
         if not hasattr(self.model, "num_classes") and not self._num_classes:
-            raise AttributeError("The input model does not provide num_classes.")
+            raise AttributeError(
+                "Neither the input model nor the LitModel defines `num_classes`."
+            )
+        if not self._num_classes == self.model.num_classes:
+            raise ValueError(
+                "`num_classes` differs between the input model and LitModel."
+            )
         return self._num_classes or self.model.num_classes
 
     def _log(
@@ -89,16 +93,21 @@ class LitModel(LightningModule):
         y : torch.Tensor
             The true labels.
         """
-        acc = accuracy(
-            preds=y_hat, target=y, task="multiclass", num_classes=self.num_classes
-        )
+        metrics = {
+            "loss": loss,
+            "accuracy": accuracy(
+                preds=y_hat, target=y, task="multiclass", num_classes=self.num_classes
+            ),
+        }
         self.log_dict(
-            {f"{stage}/loss": loss, f"{stage}/accuracy": acc},
+            {f"{stage}/{k}": v for k, v in metrics.items()},
             on_step=False,
             on_epoch=True,
         )
 
-    def configure_optimizers(self) -> Union[
+    def configure_optimizers(
+        self,
+    ) -> Union[
         List[optim.Optimizer],
         Tuple[List[optim.Optimizer], List[lr_scheduler.LRScheduler]],
     ]:
@@ -223,11 +232,11 @@ class LitModel(LightningModule):
         if not os.path.exists(path):
             raise FileNotFoundError(f"Checkpoint file not found: {path}")
         if verbose:
-            print("[bold]Load checkpoint:[/] Loading...")
-        self.load_state_dict(
-            torch.load(path, map_location=device_handler(device))["state_dict"],
-            strict=strict,
+            print("[bold]Load checkpoint:[/] ...", end="\r")
+        weight = torch.load(
+            path, map_location=device_handler(device), weights_only=False
         )
+        self.load_state_dict(weight["state_dict"], strict=strict)
         if verbose:
             print("[bold]Load checkpoint:[/] Done")
 

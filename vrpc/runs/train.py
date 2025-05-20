@@ -1,38 +1,32 @@
 import shutil
 
-from lightning.pytorch.utilities.types import EVAL_DATALOADERS
-from torchvision import models, datasets
-from torch.utils.data import DataLoader
-import torch.optim.lr_scheduler as ls
-import torch.optim as optim
-import torch.nn as nn
-import torch
-
-from lightning.pytorch.tuner import Tuner
-from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch import seed_everything, Trainer, LightningDataModule
-
-from omegaconf import DictConfig, open_dict
-from torchinfo import summary
-from rich import traceback
-import rootutils
 import hydra
+import rootutils
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.optim.lr_scheduler as ls
+from lightning.pytorch import LightningDataModule, Trainer, seed_everything
+from lightning.pytorch.loggers import TensorBoardLogger
+from omegaconf import DictConfig, open_dict
+from rich import traceback
+from torch.utils.data import DataLoader
 
 rootutils.autosetup()
 traceback.install()
 
-from torchview import draw_graph
-from modules import LitModel, scheduler_with_warmup, custom_callbacks
-from modules.data import CustomDataModule, DataTransformation as DT
+# from torchview import draw_graph
+from models.Custom import BasicStage
+from modules import LitModel, custom_callbacks, scheduler_with_warmup
+from modules.data import DataTransformation as DT
 from modules.data.tinyimagenetloader import (
-    TrainTinyImageNetDataset,
     TestTinyImageNetDataset,
+    TrainTinyImageNetDataset,
+)
+from modules.data.tinyimagenetloader import (
     id_dict as classes,
 )
-
-
-from models.Custom import BasicStage
-from models.convnext import convnext_tiny
+from modules.utils import workers_handler
 
 
 class LitDataModule(LightningDataModule):
@@ -87,7 +81,9 @@ def main(cfg: DictConfig) -> None:
 
     # Define dataset
     dataset = LitDataModule(
-        image_size=64, batch_size=cfg["trainer"]["batch_size"], num_workers=18
+        image_size=32,
+        batch_size=cfg["trainer"]["batch_size"],
+        num_workers=workers_handler(cfg["num_workers"]),
     )
     # trainset = datasets.CIFAR10(
     #     root="vrpc/data",
